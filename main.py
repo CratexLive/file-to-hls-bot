@@ -8,7 +8,7 @@ from pyrogram.types import Message
 
 API_ID = int(os.environ.get("API_ID", 29008502))
 API_HASH = os.environ.get("API_HASH", "0ec186387ca45429e36d77637743031e")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8860451513:AAFtgWhYmeraUVhAUm32DJmnRL_oOvwfSlI")
 
 # In-memory session
 bot = Client("hls_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
@@ -55,7 +55,7 @@ async def progress_bar(current, total, status_msg: Message, last_update_time):
 async def start_cmd(client, message):
     await message.reply_text(
         "👋 **Bot is Active!**\n\n"
-        "Send any video file, and it will be converted into a permanent HLS stream link for your website."
+        "Send any video file, and it will be converted into HLS format."
     )
 
 @bot.on_message(filters.video | filters.document | filters.animation)
@@ -96,34 +96,15 @@ async def handle_video(client, message):
     await proc.communicate()
     
     if os.path.exists(m3u8_file):
-        await status.edit_text("🚀 **Pushing stream files to GitHub Pages...**", parse_mode="markdown")
         if os.path.exists(input_path):
             os.remove(input_path)
             
-        try:
-            subprocess.run(["git", "config", "user.name", "HLS-Bot"], check=True)
-            subprocess.run(["git", "config", "user.email", "bot@github.com"], check=True)
-            
-            repo_url = os.environ.get("GIT_REPO_URL", "github.com/CratexLive/file-to-hls-bot.git")
-            token = os.environ.get("GH_TOKEN", "")
-            if token:
-                auth_url = f"https://{token}@{repo_url}"
-                subprocess.run(["git", "remote", "set-url", "origin", auth_url], check=True)
-
-            subprocess.run(["git", "add", "."], check=True)
-            subprocess.run(["git", "commit", "-m", f"Add HLS stream {job_id}"], check=True)
-            subprocess.run(["git", "push"], check=True)
-            
-            stream_link = f"https://cratexlive.github.io/file-to-hls-bot/streams/{job_id}/playlist.m3u8"
-            
-            await status.edit_text(
-                f"✅ **Conversion Complete!**\n\n"
-                f"🔗 **HLS Playlist Link:**\n`{stream_link}`\n\n"
-                f"💡 **You can paste this link in Shaka Player on your website.**",
-                parse_mode="markdown"
-            )
-        except Exception as e:
-            await status.edit_text(f"❌ **Git Push Error:** `{str(e)}`")
+        await status.edit_text(
+            f"✅ **Conversion Complete!**\n\n"
+            f"📁 **Job ID:** `{job_id}`\n"
+            f"💡 HLS files are successfully generated on the server storage.",
+            parse_mode="markdown"
+        )
     else:
         await status.edit_text("❌ **Conversion failed.**")
 
