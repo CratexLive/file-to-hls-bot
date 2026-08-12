@@ -2,6 +2,7 @@ import os
 import time
 import subprocess
 import asyncio
+from aiohttp import web
 from pyrogram import Client, filters, idle
 from pyrogram.types import Message
 
@@ -9,8 +10,22 @@ API_ID = int(os.environ.get("API_ID", 29008502))
 API_HASH = os.environ.get("API_HASH", "0ec186387ca45429e36d77637743031e")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 
-# In-memory session taaki session file save karne ka jhanjhat na rahe
+# In-memory session
 bot = Client("hls_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
+
+# Dummy web server to satisfy Render's Web Service port binding requirement
+async def handle(request):
+    return web.Response(text="Bot is running smoothly!")
+
+async def start_web_server():
+    app = web.Application()
+    app.add_routes([web.get("/", handle)])
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"Web server started on port {port}")
 
 def humanbytes(size):
     if not size: return "0 B"
@@ -113,8 +128,9 @@ async def handle_video(client, message):
         await status.edit_text("❌ **Conversion failed.**")
 
 async def main():
+    await start_web_server()
     await bot.start()
-    print("Render Background Worker started successfully and listening!")
+    print("Web service and Telegram bot started successfully!")
     await idle()
     await bot.stop()
 
