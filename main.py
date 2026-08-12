@@ -2,7 +2,7 @@ import os
 import time
 import subprocess
 import asyncio
-from pyrogram import Client, filters
+from pyrogram import Client, filters, idle
 from pyrogram.types import Message
 
 API_ID = int(os.environ.get("API_ID", 29008502))
@@ -100,5 +100,11 @@ async def handle_video(client, message):
     else:
         await status.edit_text("❌ **Conversion failed.**")
 
+async def main():
+    await bot.start()
+    print("Bot started successfully!")
+    await idle()
+    await bot.stop()
+
 if __name__ == "__main__":
-    bot.run()
+    asyncio.get_event_loop().run_until_complete(main())
