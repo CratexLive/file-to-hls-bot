@@ -19,11 +19,9 @@ bot = Client("hls_converter_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BO
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Bot start on web server startup
     await bot.start()
     print("🤖 Telegram Bot Started!")
     yield
-    # Bot stop on shutdown
     await bot.stop()
 
 app = FastAPI(lifespan=lifespan)
