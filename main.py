@@ -15,12 +15,19 @@ BASE_URL = os.environ.get("BASE_URL", "https://hls-tele-bot.onrender.com")
 
 os.makedirs("hls_files", exist_ok=True)
 
-bot = Client("hls_converter_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+# in_memory=True avoids disk locking/permission issues on Render
+bot = Client(
+    "hls_converter_bot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN,
+    in_memory=True
+)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await bot.start()
-    print("🤖 Telegram Bot Started!")
+    print("🤖 Telegram Bot Started and Listening!")
     yield
     await bot.stop()
 
@@ -38,7 +45,7 @@ app.mount("/hls", StaticFiles(directory="hls_files"), name="hls")
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "message": "Bot is running..."}
+    return {"status": "ok", "message": "Bot is active!"}
 
 @bot.on_message(filters.command("start"))
 async def start_cmd(client, message):
