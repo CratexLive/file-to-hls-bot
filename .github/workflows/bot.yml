@@ -2,12 +2,11 @@ name: HLS Bot Worker
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 * * * *'
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 360 # Bot ko 6 ghante tak active rakhega
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
