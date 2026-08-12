@@ -42,8 +42,15 @@ async def start_cmd(client, message):
         "Send any video file, and it will be converted into a permanent HLS stream link for your website."
     )
 
-@bot.on_message(filters.video | filters.document)
+@bot.on_message(filters.video | filters.document | filters.animation)
 async def handle_video(client, message):
+    print("Received a file/video message!")
+    
+    # Check if it's actually a video or a document containing video
+    media = message.video or message.document or message.animation
+    if not media:
+        return
+
     status = await message.reply_text("📥 **Downloading video from Telegram...**", parse_mode="markdown")
     job_id = str(message.id)
     out_dir = f"streams/{job_id}"
@@ -102,7 +109,7 @@ async def handle_video(client, message):
 
 async def main():
     await bot.start()
-    print("Bot started successfully!")
+    print("Bot started successfully and listening for media!")
     await idle()
     await bot.stop()
 
