@@ -26,7 +26,7 @@ async def progress_bar(current, total, status_msg: Message, last_update_time):
         total_size = humanbytes(total)
         bar = "█" * int(10 * current // total) + "░" * (10 - int(10 * current // total))
         text = (
-            f"📥 **Downloading Video...**\n\n"
+            f"📥 **Downloading video from Telegram...**\n\n"
             f"[{bar}] `{percentage:.1f}%`\n"
             f"⚡ **Progress:** `{completed}` / `{total_size}`"
         )
@@ -37,11 +37,14 @@ async def progress_bar(current, total, status_msg: Message, last_update_time):
 
 @bot.on_message(filters.command("start"))
 async def start_cmd(client, message):
-    await message.reply_text("👋 **Bot Active!** Video bhej, GitHub Pages par lifetime HLS link ban jayega.")
+    await message.reply_text(
+        "👋 **Bot is Active!**\n\n"
+        "Send any video file, and it will be converted into a permanent HLS stream link for your website."
+    )
 
 @bot.on_message(filters.video | filters.document)
 async def handle_video(client, message):
-    status = await message.reply_text("📥 **Starting Download...**", parse_mode="markdown")
+    status = await message.reply_text("📥 **Downloading video from Telegram...**", parse_mode="markdown")
     job_id = str(message.id)
     out_dir = f"streams/{job_id}"
     os.makedirs(out_dir, exist_ok=True)
@@ -54,10 +57,10 @@ async def handle_video(client, message):
             progress_args=(status, [time.time()])
         )
     except Exception as e:
-        await status.edit_text(f"❌ Download Failed: `{str(e)}`")
+        await status.edit_text(f"❌ **Download Failed:** `{str(e)}`")
         return
 
-    await status.edit_text("⚙️ **Converting to HLS (.m3u8)...**", parse_mode="markdown")
+    await status.edit_text("⚙️ **Converting video to HLS format...**", parse_mode="markdown")
     m3u8_file = f"{out_dir}/playlist.m3u8"
     
     cmd = [
@@ -73,7 +76,7 @@ async def handle_video(client, message):
     await proc.communicate()
     
     if os.path.exists(m3u8_file):
-        await status.edit_text("🚀 **Pushing Stream Files to GitHub Pages...**", parse_mode="markdown")
+        await status.edit_text("🚀 **Pushing stream files to GitHub Pages...**", parse_mode="markdown")
         if os.path.exists(input_path):
             os.remove(input_path)
             
@@ -87,13 +90,15 @@ async def handle_video(client, message):
             stream_link = f"https://cratexlive.github.io/file-to-hls-bot/streams/{job_id}/playlist.m3u8"
             
             await status.edit_text(
-                f"✅ **Permanent HLS Link Created!**\n\n🔗 **Stream Link:**\n`{stream_link}`",
+                f"✅ **Conversion Complete!**\n\n"
+                f"🔗 **HLS Playlist Link:**\n`{stream_link}`\n\n"
+                f"💡 **You can paste this link in Shaka Player on your website.**",
                 parse_mode="markdown"
             )
         except Exception as e:
-            await status.edit_text(f"❌ Git Push Error: `{str(e)}`")
+            await status.edit_text(f"❌ **Git Push Error:** `{str(e)}`")
     else:
-        await status.edit_text("❌ Conversion failed.")
+        await status.edit_text("❌ **Conversion failed.**")
 
 if __name__ == "__main__":
     bot.run()
