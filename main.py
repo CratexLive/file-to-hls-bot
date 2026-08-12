@@ -9,6 +9,7 @@ API_ID = int(os.environ.get("API_ID", 29008502))
 API_HASH = os.environ.get("API_HASH", "0ec186387ca45429e36d77637743031e")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 
+# In-memory session taaki session file save karne ka jhanjhat na rahe
 bot = Client("hls_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
 
 def humanbytes(size):
@@ -44,9 +45,6 @@ async def start_cmd(client, message):
 
 @bot.on_message(filters.video | filters.document | filters.animation)
 async def handle_video(client, message):
-    print("Received a file/video message!")
-    
-    # Check if it's actually a video or a document containing video
     media = message.video or message.document or message.animation
     if not media:
         return
@@ -90,6 +88,13 @@ async def handle_video(client, message):
         try:
             subprocess.run(["git", "config", "user.name", "HLS-Bot"], check=True)
             subprocess.run(["git", "config", "user.email", "bot@github.com"], check=True)
+            
+            repo_url = os.environ.get("GIT_REPO_URL", "github.com/CratexLive/file-to-hls-bot.git")
+            token = os.environ.get("GH_TOKEN", "")
+            if token:
+                auth_url = f"https://{token}@{repo_url}"
+                subprocess.run(["git", "remote", "set-url", "origin", auth_url], check=True)
+
             subprocess.run(["git", "add", "."], check=True)
             subprocess.run(["git", "commit", "-m", f"Add HLS stream {job_id}"], check=True)
             subprocess.run(["git", "push"], check=True)
@@ -109,7 +114,7 @@ async def handle_video(client, message):
 
 async def main():
     await bot.start()
-    print("Bot started successfully and listening for media!")
+    print("Render Background Worker started successfully and listening!")
     await idle()
     await bot.stop()
 
