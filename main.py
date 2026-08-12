@@ -1,6 +1,7 @@
 import os
 import subprocess
 import asyncio
+from contextlib import asynccontextmanager
 from pyrogram import Client, filters
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,9 +11,22 @@ import uvicorn
 API_ID = int(os.environ.get("API_ID", 29008502))
 API_HASH = os.environ.get("API_HASH", "0ec186387ca45429e36d77637743031e")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8860451513:AAFtgWhYmeraUVhAUm32DJmnRL_oOvwfSlI")
-BASE_URL = os.environ.get("BASE_URL", "https://your-app-name.koyeb.app")
+BASE_URL = os.environ.get("BASE_URL", "https://hls-tele-bot.onrender.com")
 
-app = FastAPI()
+os.makedirs("hls_files", exist_ok=True)
+
+bot = Client("hls_converter_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Bot start on web server startup
+    await bot.start()
+    print("🤖 Telegram Bot Started!")
+    yield
+    # Bot stop on shutdown
+    await bot.stop()
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -22,10 +36,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-os.makedirs("hls_files", exist_ok=True)
 app.mount("/hls", StaticFiles(directory="hls_files"), name="hls")
 
-bot = Client("hls_converter_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+@app.get("/")
+async def root():
+    return {"status": "ok", "message": "Bot is running..."}
 
 @bot.on_message(filters.command("start"))
 async def start_cmd(client, message):
@@ -72,14 +87,6 @@ async def handle_video(client, message):
     else:
         await status.edit_text("❌ **Failed to convert video.** Please try another file format.")
 
-async def start_all():
-    port = int(os.environ.get("PORT", 8080))
-    config = uvicorn.Config(app, host="0.0.0.0", port=port)
-    server = uvicorn.Server(config)
-    
-    await bot.start()
-    await server.serve()
-
 if __name__ == "__main__":
-    asyncio.run(start_all())
-  
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)
