@@ -1,6 +1,6 @@
 import os
 import asyncio
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import uvicorn
@@ -9,6 +9,12 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8860451513:AAFtgWhYmeraUVhAUm32DJmnRL_oOvwfSlI")
 BASE_URL = os.environ.get("BASE_URL", "https://hls-tele-bot.onrender.com")
+
+ALLOWED_DOMAINS = [
+    "https://yourdomain.com",
+    "https://www.yourdomain.com",
+    "http://localhost:3000"
+]
 
 os.makedirs("hls_files", exist_ok=True)
 
@@ -22,14 +28,31 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def verify_domain_origin(request: Request, call_next):
+    if request.url.path.startswith("/hls"):
+        referer = request.headers.get("referer")
+        origin = request.headers.get("origin")
+        
+        if referer or origin:
+            is_allowed = any(
+                (referer and referer.startswith(domain)) or (origin and origin.startswith(domain))
+                for domain in ALLOWED_DOMAINS
+            )
+            if not is_allowed:
+                return Response(content="Access Denied: Domain not authorized", status_code=403)
+
+    response = await call_next(request)
+    return response
+
 app.mount("/hls", StaticFiles(directory="hls_files"), name="hls")
 
 @app.get("/")
 async def root():
     return {"status": "ok", "message": "Bot is live"}
 
-# --- Telegram Bot Logic ---
-tg_app = Application.builder().token(BOT_TOKEN).build()
+# --- Telegram Bot Setup ---
+tg_app = Application.builder().token(BOT_TOKEN).read_timeout(300).write_timeout(300).build()
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -46,18 +69,24 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     out_dir = f"hls_files/{job_id}"
     os.makedirs(out_dir, exist_ok=True)
     
-    video_file = await (message.video or message.document).get_file()
+    video_obj = message.video or message.document
+    video_file = await video_obj.get_file()
     input_path = f"{out_dir}/input.mp4"
+    
+    # Download with custom timeout handling
     await video_file.download_to_drive(input_path)
     
-    await status.edit_text("⚙️ **Converting video to HLS (.m3u8)... Please wait.**", parse_mode="Markdown")
+    await status.edit_text("⚙️ **Converting video to HLS (.m3u8)... Fast processing active.**", parse_mode="Markdown")
     
     m3u8_file = f"{out_dir}/playlist.m3u8"
+    
+    # Fast FFmpeg command without re-encoding video streams
     cmd = [
         "ffmpeg", "-i", input_path,
-        "-codec", "copy",
+        "-c:v", "copy",
+        "-c:a", "copy",
         "-start_number", "0",
-        "-hls_time", "10",
+        "-hls_time", "6",
         "-hls_list_size", "0",
         "-f", "hls", m3u8_file
     ]
@@ -73,7 +102,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status.edit_text(
             f"✅ **Conversion Complete!**\n\n"
             f"🔗 **HLS Playlist Link:**\n`{stream_link}`\n\n"
-            f"💡 *You can paste this link in Shaka Player, HLS.js, or any video web player.*",
+            f"💡 *You can paste this link in Shaka Player on your website.*",
             parse_mode="Markdown"
         )
     else:
