@@ -1,5 +1,8 @@
 import os
 import asyncio
+import time
+import aiofiles
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -28,56 +31,103 @@ app.mount("/hls", StaticFiles(directory="hls_files"), name="hls")
 async def root():
     return {"status": "ok", "message": "Bot is live"}
 
+# --- Anti-Sleep Mechanism ---
+async def self_ping():
+    """Pings the Render app URL every 10 minutes to prevent spin-down."""
+    await asyncio.sleep(30) # Wait for startup
+    async with httpx.AsyncClient() as client:
+        while True:
+            try:
+                response = await client.get(BASE_URL)
+                print(f"🔄 Self-ping status: {response.status_code}")
+            except Exception as e:
+                print(f"⚠️ Self-ping failed: {e}")
+            await asyncio.sleep(600) # 10 minutes
+
 # --- Telegram Bot Logic ---
 tg_app = Application.builder().token(BOT_TOKEN).build()
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 **Welcome to HLS Converter Bot!**\n\n"
-        "Send or forward me any video file (`.mp4`, `.mkv`), and I will convert it into an `.m3u8` streaming link for you.",
+        "👋 **Welcome to Advanced HLS Converter Bot!**\n\n"
+        "Send or forward me any video file (up to **2GB**), and I will convert it into an `.m3u8` streaming link with live progress tracking.",
         parse_mode="Markdown"
     )
 
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
-    status = await message.reply_text("📥 **Downloading video from Telegram...**", parse_mode="Markdown")
+    status_msg = await message.reply_text("📥 **Initializing download (Up to 2GB support)...**", parse_mode="Markdown")
     
     job_id = str(message.message_id)
     out_dir = f"hls_files/{job_id}"
     os.makedirs(out_dir, exist_ok=True)
     
-    video_file = await (message.video or message.document).get_file()
-    input_path = f"{out_dir}/input.mp4"
-    await video_file.download_to_drive(input_path)
+    video_obj = message.video or message.document
+    file_size_mb = video_obj.file_size / (1024 * 1024)
     
-    await status.edit_text("⚙️ **Converting video to HLS (.m3u8)... Please wait.**", parse_mode="Markdown")
-    
-    m3u8_file = f"{out_dir}/playlist.m3u8"
-    cmd = [
-        "ffmpeg", "-i", input_path,
-        "-codec", "copy",
-        "-start_number", "0",
-        "-hls_time", "10",
-        "-hls_list_size", "0",
-        "-f", "hls", m3u8_file
-    ]
-    
-    proc = await asyncio.create_subprocess_exec(*cmd)
-    await proc.communicate()
-    
-    if os.path.exists(m3u8_file):
-        if os.path.exists(input_path):
-            os.remove(input_path)
-            
-        stream_link = f"{BASE_URL.rstrip('/')}/hls/{job_id}/playlist.m3u8"
-        await status.edit_text(
-            f"✅ **Conversion Complete!**\n\n"
-            f"🔗 **HLS Playlist Link:**\n`{stream_link}`\n\n"
-            f"💡 *You can paste this link in Shaka Player, HLS.js, or any video web player.*",
-            parse_mode="Markdown"
+    if file_size_mb > 2048:
+        await status_msg.edit_text("❌ **File too large!** Max supported size is 2GB.")
+        return
+
+    try:
+        # Download file securely using PTB file getter
+        file_info = await video_obj.get_file()
+        input_path = f"{out_dir}/input.mp4"
+        
+        await status_msg.edit_text(f"📥 **Downloading video ({file_size_mb:.1f} MB)... Please wait.**", parse_mode="Markdown")
+        await file_info.download_to_drive(input_path)
+        
+        await status_msg.edit_text("⚙️ **Starting HLS Conversion...**", parse_mode="Markdown")
+        
+        m3u8_file = f"{out_dir}/playlist.m3u8"
+        
+        # FFmpeg command optimized for streaming compatibility
+        cmd = [
+            "ffmpeg", "-y", "-i", input_path,
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+            "-c:a", "aac", "-b:a", "128k",
+            "-hls_time", "10",
+            "-hls_list_size", "0",
+            "-f", "hls", m3u8_file
+        ]
+        
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
         )
-    else:
-        await status.edit_text("❌ **Failed to convert video.** Please try another file format.")
+        
+        # Read stderr to show progress live
+        while True:
+            line = await proc.stderr.readline()
+            if not line:
+                break
+            decoded = line.decode("utf-8", errors="ignore")
+            if "frame=" in decoded:
+                try:
+                    await status_msg.edit_text(f"⚙️ **Converting...**\n`{decoded.strip()}`", parse_mode="Markdown")
+                except Exception:
+                    pass # Ignore flood-wait limits if Telegram rate limits message edits
+                    
+        await proc.wait()
+        
+        if os.path.exists(m3u8_file):
+            if os.path.exists(input_path):
+                os.remove(input_path)
+                
+            stream_link = f"{BASE_URL.rstrip('/')}/hls/{job_id}/playlist.m3u8"
+            await status_msg.edit_text(
+                f"✅ **Conversion Complete!**\n\n"
+                f"📊 **File Size:** {file_size_mb:.1f} MB\n"
+                f"🔗 **HLS Playlist Link:**\n`{stream_link}`\n\n"
+                f"💡 *Paste this link into Shaka Player or HLS.js web players.*",
+                parse_mode="Markdown"
+            )
+        else:
+            await status_msg.edit_text("❌ **Failed to convert video.** Codec error or unsupported format.")
+            
+    except Exception as e:
+        await status_msg.edit_text(f"❌ **An error occurred:** `{str(e)}`", parse_mode="Markdown")
 
 tg_app.add_handler(CommandHandler("start", start_cmd))
 tg_app.add_handler(MessageHandler(filters.VIDEO | filters.Document.ALL, handle_video))
@@ -88,6 +138,8 @@ async def startup_event():
     await tg_app.start()
     await tg_app.updater.start_polling(drop_pending_updates=True)
     print("🤖 Telegram Bot Polling Started!")
+    # Start anti-sleep background task
+    asyncio.create_task(self_ping())
 
 @app.on_event("shutdown")
 async def shutdown_event():
