@@ -33,7 +33,7 @@ async def root():
 # --- Anti-Sleep Mechanism ---
 async def self_ping():
     """Pings the Render app URL every 10 minutes to prevent spin-down."""
-    await asyncio.sleep(30) # Wait for startup
+    await asyncio.sleep(30)
     async with httpx.AsyncClient() as client:
         while True:
             try:
@@ -41,7 +41,7 @@ async def self_ping():
                 print(f"🔄 Self-ping status: {response.status_code}")
             except Exception as e:
                 print(f"⚠️ Self-ping failed: {e}")
-            await asyncio.sleep(600) # 10 minutes
+            await asyncio.sleep(600)
 
 # --- Telegram Bot Logic ---
 tg_app = Application.builder().token(BOT_TOKEN).build()
@@ -71,13 +71,11 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await status_msg.edit_text(f"📥 **Downloading video ({file_size_mb:.1f} MB)... Please wait.**", parse_mode="Markdown")
         
-        # Get direct file path from Telegram servers bypassing standard limits
         file_info = await video_obj.get_file()
         file_url = file_info.file_path
         
         input_path = f"{out_dir}/input.mp4"
         
-        # Download large files in chunks using httpx to prevent memory/size errors
         async with httpx.AsyncClient(timeout=None) as client:
             async with client.stream("GET", file_url) as response:
                 async with aiofiles.open(input_path, "wb") as f:
@@ -141,7 +139,8 @@ tg_app.add_handler(MessageHandler(filters.VIDEO | filters.Document.ALL, handle_v
 async def startup_event():
     await tg_app.initialize()
     await tg_app.start()
-    await tg_app.updater.start_polling(drop_pending_updates=True)
+    # Drop pending updates forces clearing any old stuck sessions
+    await tg_app.updater.start_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
     print("🤖 Telegram Bot Polling Started!")
     asyncio.create_task(self_ping())
 
