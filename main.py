@@ -1,91 +1,61 @@
 import os
-import time
-import subprocess
 import asyncio
-from aiohttp import web
-from pyrogram import Client, filters, idle
-from pyrogram.types import Message
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+import uvicorn
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-API_ID = int(os.environ.get("API_ID", 29008502))
-API_HASH = os.environ.get("API_HASH", "0ec186387ca45429e36d77637743031e")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8860451513:AAFtgWhYmeraUVhAUm32DJmnRL_oOvwfSlI")
+BASE_URL = os.environ.get("BASE_URL", "https://hls-tele-bot.onrender.com")
 
-# In-memory session
-bot = Client("hls_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
+os.makedirs("hls_files", exist_ok=True)
 
-# Dummy web server to satisfy Render's Web Service port binding requirement
-async def handle(request):
-    return web.Response(text="Bot is running smoothly!")
+app = FastAPI()
 
-async def start_web_server():
-    app = web.Application()
-    app.add_routes([web.get("/", handle)])
-    runner = web.AppRunner(app)
-    await runner.setup()
-    port = int(os.environ.get("PORT", 10000))
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-    print(f"Web server started on port {port}")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-def humanbytes(size):
-    if not size: return "0 B"
-    for unit in ["B", "KB", "MB", "GB", "TB"]:
-        if size < 1024: return f"{size:.2f} {unit}"
-        size /= 1024
+app.mount("/hls", StaticFiles(directory="hls_files"), name="hls")
 
-async def progress_bar(current, total, status_msg: Message, last_update_time):
-    now = time.time()
-    if now - last_update_time[0] > 3 or current == total:
-        last_update_time[0] = now
-        percentage = (current / total) * 100
-        completed = humanbytes(current)
-        total_size = humanbytes(total)
-        bar = "█" * int(10 * current // total) + "░" * (10 - int(10 * current // total))
-        text = (
-            f"📥 **Downloading video from Telegram...**\n\n"
-            f"[{bar}] `{percentage:.1f}%`\n"
-            f"⚡ **Progress:** `{completed}` / `{total_size}`"
-        )
-        try:
-            await status_msg.edit_text(text, parse_mode="markdown")
-        except Exception:
-            pass
+@app.get("/")
+async def root():
+    return {"status": "ok", "message": "Bot is live"}
 
-@bot.on_message(filters.command("start"))
-async def start_cmd(client, message):
-    await message.reply_text(
-        "👋 **Bot is Active!**\n\n"
-        "Send any video file, and it will be converted into HLS format."
+# --- Telegram Bot Logic ---
+tg_app = Application.builder().token(BOT_TOKEN).build()
+
+async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "👋 **Welcome to HLS Converter Bot!**\n\n"
+        "Send or forward me any video file (`.mp4`, `.mkv`), and I will convert it into an `.m3u8` streaming link for you.",
+        parse_mode="Markdown"
     )
 
-@bot.on_message(filters.video | filters.document | filters.animation)
-async def handle_video(client, message):
-    media = message.video or message.document or message.animation
-    if not media:
-        return
-
-    status = await message.reply_text("📥 **Downloading video from Telegram...**", parse_mode="markdown")
-    job_id = str(message.id)
-    out_dir = f"streams/{job_id}"
+async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.message
+    status = await message.reply_text("📥 **Downloading video from Telegram...**", parse_mode="Markdown")
+    
+    job_id = str(message.message_id)
+    out_dir = f"hls_files/{job_id}"
     os.makedirs(out_dir, exist_ok=True)
+    
+    video_file = await (message.video or message.document).get_file()
     input_path = f"{out_dir}/input.mp4"
+    await video_file.download_to_drive(input_path)
     
-    try:
-        await message.download(
-            file_name=input_path,
-            progress=progress_bar,
-            progress_args=(status, [time.time()])
-        )
-    except Exception as e:
-        await status.edit_text(f"❌ **Download Failed:** `{str(e)}`")
-        return
-
-    await status.edit_text("⚙️ **Converting video to HLS format...**", parse_mode="markdown")
+    await status.edit_text("⚙️ **Converting video to HLS (.m3u8)... Please wait.**", parse_mode="Markdown")
+    
     m3u8_file = f"{out_dir}/playlist.m3u8"
-    
     cmd = [
         "ffmpeg", "-i", input_path,
-        "-c", "copy",
+        "-codec", "copy",
         "-start_number", "0",
         "-hls_time", "10",
         "-hls_list_size", "0",
@@ -99,21 +69,32 @@ async def handle_video(client, message):
         if os.path.exists(input_path):
             os.remove(input_path)
             
+        stream_link = f"{BASE_URL.rstrip('/')}/hls/{job_id}/playlist.m3u8"
         await status.edit_text(
             f"✅ **Conversion Complete!**\n\n"
-            f"📁 **Job ID:** `{job_id}`\n"
-            f"💡 HLS files are successfully generated on the server storage.",
-            parse_mode="markdown"
+            f"🔗 **HLS Playlist Link:**\n`{stream_link}`\n\n"
+            f"💡 *You can paste this link in Shaka Player, HLS.js, or any video web player.*",
+            parse_mode="Markdown"
         )
     else:
-        await status.edit_text("❌ **Conversion failed.**")
+        await status.edit_text("❌ **Failed to convert video.** Please try another file format.")
 
-async def main():
-    await start_web_server()
-    await bot.start()
-    print("Web service and Telegram bot started successfully!")
-    await idle()
-    await bot.stop()
+tg_app.add_handler(CommandHandler("start", start_cmd))
+tg_app.add_handler(MessageHandler(filters.VIDEO | filters.Document.ALL, handle_video))
+
+@app.on_event("startup")
+async def startup_event():
+    await tg_app.initialize()
+    await tg_app.start()
+    await tg_app.updater.start_polling(drop_pending_updates=True)
+    print("🤖 Telegram Bot Polling Started!")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await tg_app.updater.stop()
+    await tg_app.stop()
+    await tg_app.shutdown()
 
 if __name__ == "__main__":
-    asyncio.get_event_loop().run_until_complete(main())
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)
