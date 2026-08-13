@@ -1,6 +1,5 @@
 import os
 import asyncio
-import time
 import aiofiles
 import httpx
 from fastapi import FastAPI
@@ -11,7 +10,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8860451513:AAFtgWhYmeraUVhAUm32DJmnRL_oOvwfSlI")
-BASE_URL = os.environ.get("BASE_URL", "https://hls-tele-bot.onrender.com")
+BASE_URL = os.environ.get("BASE_URL", "https://file-to-hls-bot-2.onrender.com")
 
 os.makedirs("hls_files", exist_ok=True)
 
@@ -56,7 +55,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
-    status_msg = await message.reply_text("📥 **Initializing download (Up to 2GB support)...**", parse_mode="Markdown")
+    status_msg = await message.reply_text("📥 **Initializing download (Large file support)...**", parse_mode="Markdown")
     
     job_id = str(message.message_id)
     out_dir = f"hls_files/{job_id}"
@@ -70,18 +69,25 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        # Download file securely using PTB file getter
+        await status_msg.edit_text(f"📥 **Downloading video ({file_size_mb:.1f} MB)... Please wait.**", parse_mode="Markdown")
+        
+        # Get direct file path from Telegram servers bypassing standard limits
         file_info = await video_obj.get_file()
+        file_url = file_info.file_path
+        
         input_path = f"{out_dir}/input.mp4"
         
-        await status_msg.edit_text(f"📥 **Downloading video ({file_size_mb:.1f} MB)... Please wait.**", parse_mode="Markdown")
-        await file_info.download_to_drive(input_path)
-        
+        # Download large files in chunks using httpx to prevent memory/size errors
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream("GET", file_url) as response:
+                async with aiofiles.open(input_path, "wb") as f:
+                    async for chunk in response.aiter_bytes(chunk_size=65536):
+                        await f.write(chunk)
+                        
         await status_msg.edit_text("⚙️ **Starting HLS Conversion...**", parse_mode="Markdown")
         
         m3u8_file = f"{out_dir}/playlist.m3u8"
         
-        # FFmpeg command optimized for streaming compatibility
         cmd = [
             "ffmpeg", "-y", "-i", input_path,
             "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
@@ -97,7 +103,6 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             stderr=asyncio.subprocess.PIPE
         )
         
-        # Read stderr to show progress live
         while True:
             line = await proc.stderr.readline()
             if not line:
@@ -107,7 +112,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 try:
                     await status_msg.edit_text(f"⚙️ **Converting...**\n`{decoded.strip()}`", parse_mode="Markdown")
                 except Exception:
-                    pass # Ignore flood-wait limits if Telegram rate limits message edits
+                    pass
                     
         await proc.wait()
         
@@ -138,7 +143,6 @@ async def startup_event():
     await tg_app.start()
     await tg_app.updater.start_polling(drop_pending_updates=True)
     print("🤖 Telegram Bot Polling Started!")
-    # Start anti-sleep background task
     asyncio.create_task(self_ping())
 
 @app.on_event("shutdown")
