@@ -1,9 +1,9 @@
 FROM python:3.10-slim
 
-# Install system dependencies including FFmpeg and Git
+# Install system dependencies including FFmpeg and curl (for anti-sleep ping)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
-    git \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
